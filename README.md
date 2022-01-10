@@ -1,2 +1,2 @@
-# EDS232_Lab01
+# EDS232_INat_species_distribution
 Species Distribution Modeling
