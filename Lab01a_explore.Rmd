@@ -12,12 +12,12 @@ knitr::opts_chunk$set(echo = TRUE)
 options(scipen = 999)
 ```
 
-```{r}
+```{r, warning=FALSE}
 # load packages, installing if missing
-if (!require(librarian)){
-  install.packages("librarian")
-  library(librarian)
-}
+# if (!require(librarian)){
+#   install.packages("librarian")
+#   library(librarian)
+#}
 librarian::shelf(
   dismo, dplyr, DT, ggplot2, here, htmltools, leaflet, mapview, purrr, raster, readr, rgbif, rgdal, rJava, sdmpredictors, sf, spocc, tidyr)
 select <- dplyr::select # overwrite raster::select
@@ -37,7 +37,7 @@ This machine learning analysis was completed as an assignment for my Master’s 
 
 My chosen species is coyote brush (*Baccharis pilularis*). **Baccharis pilularis** is native to the west coast of the United States (Oregon, California, and Baja California, Mexico). It is a shurb in the Asteraceae (Sunflower) family with oblanceolate to obovate toothed leaves, panicle-like inflorescence with staminate flowers that when mature mimic snow, and generally sticky (*not a pun*) [@jepson:bp].
 
-![Baccharis pilularis](images/bacpil_habitat_calscape.jpeg)
+![Baccharis pilularis Image Credit: CalScape](images/bacpil_habitat_calscape.jpeg)
 
 # Explore
 
@@ -269,8 +269,6 @@ pts_env %>%
     legend.position = c(1, 0),
     legend.justification = c(1, 0))
 ```
-
-
 
 
 
