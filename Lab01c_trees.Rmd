@@ -4,8 +4,7 @@ author: "Julia Parish"
 date: "2022/01/26"
 bibliography: bibliography.bib
 output: html_document
-editor_options: 
-  chunk_output_type: console
+
 ---
 
 # Setup
@@ -68,48 +67,7 @@ In this portion of the lab you'll use **Decision Trees** as a **Classification**
 -   **Random Forest** (`RandomForest()`)\
     Actually an ensemble model, ie trees of trees.
 
-# Setup
 
-```{r setup}
-# global knitr chunk options
-knitr::opts_chunk$set(
-  warning = FALSE, 
-  message = FALSE)
-
-# load packages
-librarian::shelf(
-  caret,       # m: modeling framework
-  dplyr, ggplot2 ,here, readr, 
-  pdp,         # X: partial dependence plots
-  ranger,      # m: random forest modeling
-  rpart,       # m: recursive partition modeling
-  rpart.plot,  # m: recursive partition plotting
-  rsample,     # d: split train/test data
-  skimr,       # d: skim summarize data table
-  vip)         # X: variable importance
-
-# options
-options(
-  scipen = 999,
-  readr.show_col_types = F)
-set.seed(42)
-
-# graphical theme
-ggplot2::theme_set(ggplot2::theme_light())
-
-# paths
-dir_data    <- here("data/sdm")
-pts_env_csv <- file.path(dir_data, "pts_env.csv")
-
-# read data
-pts_env <- read_csv(pts_env_csv)
-d <- pts_env %>% 
-  select(-ID) %>%                   # not used as a predictor x
-  mutate(
-    present = factor(present)) %>%  # categorical response
-  na.omit()                         # drop rows with NA
-skim(d)
-```
 
 ## Split data into training and testing
 
