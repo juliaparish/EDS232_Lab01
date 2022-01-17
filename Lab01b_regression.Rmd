@@ -1,0 +1,215 @@
+---
+title: "Lab 01B Species Distribution Modeling - Logistic Regression"
+author: "Julia Parish"
+date: "2022/01/19"
+bibliography: bibliography.bib
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+options(scipen = 999)
+```
+
+```{r load pkgs data}
+librarian::shelf(
+  DT, dplyr, dismo, GGally, here, readr, tidyr)
+select <- dplyr::select # overwrite raster::select
+options(readr.show_col_types = F)
+
+dir_data    <- here("data/sdm")
+pts_env_csv <- file.path(dir_data, "pts_env.csv")
+
+```
+
+```{r}
+pts_env <- read_csv(pts_env_csv)
+nrow(pts_env)
+
+datatable(pts_env, rownames = F)
+```
+
+# Learning Objectives {-}
+
+- **Exploratory Data Analysis** (cont'd): 
+  - Pairs plot to show correlation between variables and avoid **multicollinearity** (see [8.2 Many predictors in a model](https://openintro-ims.netlify.app/model-mlr.html#many-predictors-in-a-model))
+- **Logistic Regression** seen as an evolution of techniques
+  - **Linear Model** to show simplest multivariate regression, but predictions can be outside the binary values.
+  - **Generalized Linear Model** uses a logit transformation to constrain the outputs to being within two values.
+  - **Generalized Additive Model** allows for "wiggle" in predictor terms.
+  - **Maxent** (Maximum Entropy) is a presence-only modeling technique that allows for a more complex set of shapes between predictor and response.
+
+# Explore (cont'd)
+
+#### Pairs Plot
+Show correlations between variables. 
+
+```{r ggpairs, fig.cap="Pairs plot with `present` color coded.", fig.width=11, fig.height=11, eval=T}
+GGally::ggpairs(
+  select(pts_env, -ID),
+  aes(color = factor(present)))
+```
+
+# Logistic Regression
+
+```{r fig.cap="Full model workflow with split, fit, predict and evaluate process steps.", echo=F}
+# [model-workflow - Google Drawings](https://docs.google.com/drawings/d/1bnevzcNpkRtopo3jagpwBy0IyNN-uh_mVJXvQg4WRtU/edit)
+knitr::include_graphics("https://docs.google.com/drawings/d/e/2PACX-1vSab7DR3sDS1aoRWNDCfb8NUDE5a1P701NIZrb5zb5ss3RAhvfLJxuRLhHpJpKAW8krtGRkwm-jKa1Y/pub?w=932&h=344")
+```
+
+## Setup Data
+
+Let's setup a data frame with only the data we want to model by:
+
+- Dropping rows with any NAs. Later we'll learn how to ["impute"](https://bbest.github.io/eds232-ml/glossary.html#imputation) values with guesses so as to not throw away data.
+- Removing terms we don't want to model. We can then use a simplified formula $present \sim .$ to predict $present$ based on all other fields in the data frame (i.e. the $X$`s in $y \sim x_1 + x_2 + ... x_n$).
+
+```{r setup d}
+# setup model data
+d <- pts_env %>% 
+  select(-ID) %>%  # remove terms we don't want to model
+  tidyr::drop_na() # drop the rows with NA values
+nrow(d)
+```
+
+## Linear Model
+
+Let's start as simply as possible with a linear model `lm()` on multiple predictors `X` to predict presence `y` using a simpler workflow.
+
+```{r fig.cap="Simpler workflow with only fit and predict of all data, i.e. no splitting.", echo=F}
+# [model-workflow_fit-all-predict-all - Google Drawings](https://docs.google.com/drawings/d/1JtWF-4dltWR0hSAZBGaqQdLShReLVjLhKZG8iRpVY2A/edit)
+knitr::include_graphics("https://docs.google.com/drawings/d/e/2PACX-1vRRvQdrDELT9QRPJxj8ooPvABgjQ-qqjzC0Ri9Hhv6n1O7N31eb4o6c7ZhZd6QtQ7XgZybNhUBESK9L/pub?w=572&h=170")
+```
+
+
+```{r fit lm}
+# fit a linear model
+mdl <- lm(present ~ ., data = d)
+summary(mdl)
+
+y_predict <- predict(mdl, d, type="response")
+y_true    <- d$present
+
+range(y_predict)
+range(y_true)
+```
+
+The problem with these predictions is that it ranges outside the possible values of present `1` and absent `0`. (Later we'll deal with converting values within this range to either `1` or `0` by applying a cutoff value; i.e. any values > 0.5 become 1 and below become 0.)
+
+## Generalized Linear Model
+
+To solve this problem of constraining the response term to being between the two possible values, i.e. the **probability** $p$ of being one or the other possible $y$ values, we'll apply the logistic transformation on the response term.
+
+$$
+logit(p_i) = \log_{e}\left( \frac{p_i}{1-p_i} \right)
+$$
+
+We can expand the expansion of the predicted term, i.e. the probability $p$ of being either $y$, with all possible predictors $X$ whereby each coeefficient $b$ gets multiplied by the value of $x$:
+
+$$
+\log_{e}\left( \frac{p_i}{1-p_i} \right) = b_0 + b_1 x_{1,i} + b_2 x_{2,i} + \cdots + b_k x_{k,i}
+$$
+
+```{r fit glm}
+# fit a generalized linear model with a binomial logit link function
+mdl <- glm(present ~ ., family = binomial(link="logit"), data = d)
+summary(mdl)
+
+y_predict <- predict(mdl, d, type="response")
+
+range(y_predict)
+```
+
+Excellent, our response is now constrained between 0 and 1. Next, let's look at the term plots to see the relationship between predictor and response.
+
+```{r termplots glm}
+# show term plots
+termplot(mdl, partial.resid = TRUE, se = TRUE, main = F, ylim="free")
+```
+
+## Generalized Additive Model
+
+With a generalized additive model we can add "wiggle" to the relationship between predictor and response by introducing smooth `s()` terms.
+
+```{r fit gam}
+librarian::shelf(mgcv)
+
+# fit a generalized additive model with smooth predictors
+mdl <- mgcv::gam(
+  formula = present ~ s(WC_alt) + s(WC_bio1) + 
+    s(WC_bio2) + s(ER_tri) + s(ER_topoWet) + s(lon) + s(lat), 
+  family = binomial, data = d)
+summary(mdl)
+
+# show term plots
+plot(mdl, scale=0)
+```
+
+# HELP
+
+```{r gam-todo, eval=F, echo=F}
+# # TODO: model selection ?mgcv::gam
+# AIC(b0,bt) ## interaction worse than additive
+# bt <- gam(y~s(x0)+s(x1)+s(x2)+s(x3)+ti(x1,x2,k=6),
+#             data=dat,method="REML")
+# bs <- gam(y~s(x0,x1,k=40)+s(x2)+s(x3),data=dat,
+#           method="REML")
+# AIC(b0,bt,bs) ## additive still better.
+# ## Now do automatic terms selection as well
+# b1 <- gam(y~s(x0)+s(x1)+s(x2)+s(x3),data=dat,
+#        method="REML",select=TRUE)
+# 
+# # TODO: ?predict.gam
+# pred <- predict.gam(mdl, newd)
+```
+
+## Maxent (Maximum Entropy)
+
+Maxent is probably the most commonly used species distribution model ([Elith 2011](http://dx.doi.org/10.1111/j.1472-4642.2010.00725.x)) since it performs well with few input data points, only requires presence points (and samples background for comparison) and is easy to use with a Java graphical user interface (GUI).
+
+```{r fit maxent}
+# load extra packages
+librarian::shelf(
+  maptools, sf)
+
+mdl_maxent_rds <- file.path(dir_data, "mdl_maxent.rds")
+
+# show version of maxent
+if (!interactive())
+  maxent()
+
+# get environmental rasters
+# NOTE: the first part of Lab 1. SDM - Explore got updated to write this clipped environmental raster stack
+env_stack_grd <- file.path(dir_data, "env_stack.grd")
+env_stack <- stack(env_stack_grd)
+plot(env_stack, nc=2)
+
+# get presence-only observation points (maxent extracts raster values for you)
+obs_geo <- file.path(dir_data, "obs.geojson")
+obs_sp <- read_sf(obs_geo) %>% 
+  sf::as_Spatial() # maxent prefers sp::SpatialPoints over newer sf::sf class
+
+# fit a maximum entropy model
+if (!file.exists(mdl_maxent_rds)){
+  mdl <- maxent(env_stack, obs_sp)
+  readr::write_rds(mdl, mdl_maxent_rds)
+}
+mdl <- read_rds(mdl_maxent_rds)
+
+# plot variable contributions per predictor
+plot(mdl)
+
+# plot term plots
+response(mdl)
+
+# predict
+y_predict <- predict(env_stack, mdl) #, ext=ext, progress='')
+
+plot(y_predict, main='Maxent, raw prediction')
+data(wrld_simpl, package="maptools")
+plot(wrld_simpl, add=TRUE, border='dark grey')
+```
+
+Notice how the `plot()` function produces different outputs depending on the class of the input object. You can view help for each of these with R Console commands: `?plot.lm`, `?plot.gam` and <code  class="r">`plot,DistModel,numeric-method`</code>.
+
