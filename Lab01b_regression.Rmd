@@ -21,6 +21,7 @@ options(readr.show_col_types = F)
 dir_data    <- here("data/sdm")
 pts_env_csv <- file.path(dir_data, "pts_env.csv")
 
+redo <- TRUE
 ```
 
 ```{r}
@@ -138,30 +139,12 @@ librarian::shelf(mgcv)
 # fit a generalized additive model with smooth predictors
 mdl <- mgcv::gam(
   formula = present ~ s(WC_alt) + s(WC_bio1) + 
-    s(WC_bio2) + s(ER_tri) + s(ER_topoWet) + s(lon) + s(lat), 
+    s(WC_bio12) + s(ER_PETseasonality) + s(ER_topoWet) + s(lon) + s(lat), 
   family = binomial, data = d)
 summary(mdl)
 
 # show term plots
 plot(mdl, scale=0)
-```
-
-# HELP
-
-```{r gam-todo, eval=F, echo=F}
-# # TODO: model selection ?mgcv::gam
-# AIC(b0,bt) ## interaction worse than additive
-# bt <- gam(y~s(x0)+s(x1)+s(x2)+s(x3)+ti(x1,x2,k=6),
-#             data=dat,method="REML")
-# bs <- gam(y~s(x0,x1,k=40)+s(x2)+s(x3),data=dat,
-#           method="REML")
-# AIC(b0,bt,bs) ## additive still better.
-# ## Now do automatic terms selection as well
-# b1 <- gam(y~s(x0)+s(x1)+s(x2)+s(x3),data=dat,
-#        method="REML",select=TRUE)
-# 
-# # TODO: ?predict.gam
-# pred <- predict.gam(mdl, newd)
 ```
 
 ## Maxent (Maximum Entropy)
@@ -179,19 +162,24 @@ mdl_maxent_rds <- file.path(dir_data, "mdl_maxent.rds")
 if (!interactive())
   maxent()
 
+```
+
+```{r}
 # get environmental rasters
 # NOTE: the first part of Lab 1. SDM - Explore got updated to write this clipped environmental raster stack
 env_stack_grd <- file.path(dir_data, "env_stack.grd")
 env_stack <- stack(env_stack_grd)
 plot(env_stack, nc=2)
+```
 
+```{r}
 # get presence-only observation points (maxent extracts raster values for you)
 obs_geo <- file.path(dir_data, "obs.geojson")
 obs_sp <- read_sf(obs_geo) %>% 
   sf::as_Spatial() # maxent prefers sp::SpatialPoints over newer sf::sf class
 
 # fit a maximum entropy model
-if (!file.exists(mdl_maxent_rds)){
+if (!file.exists(mdl_maxent_rds) | redo){
   mdl <- maxent(env_stack, obs_sp)
   readr::write_rds(mdl, mdl_maxent_rds)
 }
@@ -199,10 +187,13 @@ mdl <- read_rds(mdl_maxent_rds)
 
 # plot variable contributions per predictor
 plot(mdl)
+```
 
+```{r}
 # plot term plots
 response(mdl)
-
+```
+```{r}
 # predict
 y_predict <- predict(env_stack, mdl) #, ext=ext, progress='')
 
@@ -210,6 +201,7 @@ plot(y_predict, main='Maxent, raw prediction')
 data(wrld_simpl, package="maptools")
 plot(wrld_simpl, add=TRUE, border='dark grey')
 ```
+
 
 Notice how the `plot()` function produces different outputs depending on the class of the input object. You can view help for each of these with R Console commands: `?plot.lm`, `?plot.gam` and <code  class="r">`plot,DistModel,numeric-method`</code>.
 

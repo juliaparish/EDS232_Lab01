@@ -47,8 +47,11 @@ The first step in this machine learning excercise is to download observation dat
 ```{r get obs}
 obs_csv <- file.path(dir_data, "obs.csv")
 obs_geo <- file.path(dir_data, "obs.geojson")
-redo    <- FALSE
+redo    <- TRUE
 
+```
+
+```{r}
 if (!file.exists(obs_geo) | redo){
   # get species occurrence data from GBIF with coordinates
   (res <- spocc::occ(
@@ -71,7 +74,7 @@ if (!file.exists(obs_geo) | redo){
 }
 obs <- sf::read_sf(obs_geo)
 nrow(obs) # number of rows
-
+ 
 # show points on map
 # mapview::mapview(obs, map.types = "CartoDB.Voyager")
 ```
@@ -80,6 +83,13 @@ nrow(obs) # number of rows
 obs$key <- as.factor(obs$key)
 
 obs_num <- nrow(obs)
+
+# Check for duplicates - creates a vector of T or F for each of the points ???should you use 'key' vs 'geom'???
+dups <- duplicated(obs$key)
+
+# how many duplicates were there? This will sum only the TRUE values
+sum(dups)
+
 ```
 
 - **Question 1**. How many observations total are in GBIF for your species?
@@ -118,7 +128,7 @@ env_layers <- sdmpredictors::list_layers(env_datasets_vec)
 DT::datatable(env_layers)
 
 # choose layers after some inspection and perhaps consulting literature
-env_layers_vec <- c("WC_alt", "WC_bio1", "WC_bio2", "ER_tri", "ER_topoWet")
+env_layers_vec <- c("WC_alt", "WC_bio1", "WC_bio12", "ER_PETseasonality", "ER_topoWet")
 
 # get layers
 env_stack <- load_layers(env_layers_vec)
@@ -148,11 +158,15 @@ obs_hull <- read_sf(obs_hull_geo)
 mapview(
   list(obs, obs_hull))
 
+```
+
+```{r}
+
 if (!file.exists(env_stack_grd) | redo){
   obs_hull_sp <- sf::as_Spatial(obs_hull)
   env_stack <- raster::mask(env_stack, obs_hull_sp) %>% 
     raster::crop(extent(obs_hull_sp))
-  writeRaster(env_stack, env_stack_grd, overwrite=T)  
+  writeRaster(env_stack, env_stack_grd, overwrite = T)  
 }
 env_stack <- stack(env_stack_grd)
 
@@ -164,8 +178,8 @@ plot(env_stack, nc=2)
 
 #### Pseudo-Absence
 
-
 ```{r make absence pts}
+
 absence_geo <- file.path(dir_data, "absence.geojson")
 pts_geo     <- file.path(dir_data, "pts.geojson")
 pts_env_csv <- file.path(dir_data, "pts_env.csv")
@@ -192,8 +206,13 @@ if (!file.exists(absence_geo) | redo){
 absence <- read_sf(absence_geo)
 
 # show map of presence, ie obs, and absence
-mapview(obs, col.regions = "green") + 
-  mapview(absence, col.regions = "gray")
+mapview(absence, col.regions = "gray") +
+  mapview(obs, col.regions = "green")
+
+```
+
+
+```{r}
 
 if (!file.exists(pts_env_csv) | redo){
 
