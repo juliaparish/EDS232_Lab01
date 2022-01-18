@@ -21,10 +21,11 @@ options(readr.show_col_types = F)
 dir_data    <- here("data/sdm")
 pts_env_csv <- file.path(dir_data, "pts_env.csv")
 
-redo <- TRUE
 ```
 
 ```{r}
+redo <- TRUE
+
 pts_env <- read_csv(pts_env_csv)
 nrow(pts_env)
 
@@ -138,8 +139,8 @@ librarian::shelf(mgcv)
 
 # fit a generalized additive model with smooth predictors
 mdl <- mgcv::gam(
-  formula = present ~ s(WC_alt) + s(WC_bio1) + 
-    s(WC_bio12) + s(ER_PETseasonality) + s(ER_topoWet) + s(lon) + s(lat), 
+  formula = present ~ s(WC_alt) + s(WC_bio1) + s(WC_bio12) + s(WC_bio15) + 
+    s(ER_PETseasonality) + s(ER_topoWet) + s(ER_climaticMoistureIndex) + s(lon) + s(lat),
   family = binomial, data = d)
 summary(mdl)
 
@@ -193,6 +194,7 @@ plot(mdl)
 # plot term plots
 response(mdl)
 ```
+
 ```{r}
 # predict
 y_predict <- predict(env_stack, mdl) #, ext=ext, progress='')

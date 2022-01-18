@@ -19,7 +19,7 @@ options(scipen = 999)
 #   library(librarian)
 #}
 librarian::shelf(
-  dismo, dplyr, DT, ggplot2, here, htmltools, leaflet, mapview, purrr, raster, readr, rgbif, rgdal, rJava, sdmpredictors, sf, spocc, tidyr)
+  dismo, dplyr, DT, ggplot2, here, htmltools, leaflet, mapview, purrr, raster, readr, rgbif, rgdal, rJava, sdmpredictors, sf, spocc, tidyr, GADMTools)
 select <- dplyr::select # overwrite raster::select
 options(readr.show_col_types = FALSE)
 
@@ -75,13 +75,18 @@ if (!file.exists(obs_geo) | redo){
 obs <- sf::read_sf(obs_geo)
 nrow(obs) # number of rows
  
-# show points on map
-# mapview::mapview(obs, map.types = "CartoDB.Voyager")
 ```
 
-```{r, include = FALSE}
+```{r}
+# show points on map
+mapview::mapview(obs, map.types = "CartoDB.Voyager")
+```
+
+
+```{r, message = FALSE}
 obs$key <- as.factor(obs$key)
 
+# count number of observations
 obs_num <- nrow(obs)
 
 # Check for duplicates - creates a vector of T or F for each of the points ???should you use 'key' vs 'geom'???
@@ -90,6 +95,13 @@ dups <- duplicated(obs$key)
 # how many duplicates were there? This will sum only the TRUE values
 sum(dups)
 
+# create lon and lat columns in preparation to clean inaccurate data points
+
+obs <- obs %>%
+  dplyr::mutate(lon = sf::st_coordinates(.)[,1],
+                lat = sf::st_coordinates(.)[,2])
+
+usa <- gadm_sf_loadCountries("USA", level = 2, basefile = "data/")
 ```
 
 - **Question 1**. How many observations total are in GBIF for your species?
@@ -98,7 +110,7 @@ There are `r obs_num`` observations for *Baccharis pilularis* in this data. Acco
 
 - **Question 2**.  Do you see any odd observations, like marine species on land or vice versa? 
 
-There are no observably inaccurate data points for this species. 
+There were only a few observably inaccurate data points for this species. 
 
 ### Aquire environmental data 
 
@@ -128,7 +140,7 @@ env_layers <- sdmpredictors::list_layers(env_datasets_vec)
 DT::datatable(env_layers)
 
 # choose layers after some inspection and perhaps consulting literature
-env_layers_vec <- c("WC_alt", "WC_bio1", "WC_bio12", "ER_PETseasonality", "ER_topoWet")
+env_layers_vec <- c("WC_alt", "WC_bio1", "WC_bio12", "WC_bio12", "ER_PETseasonality", "ER_topoWet", "ER_climaticMoistureIndex")
 
 # get layers
 env_stack <- load_layers(env_layers_vec)
