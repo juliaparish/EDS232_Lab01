@@ -50,7 +50,8 @@ Show correlations between variables.
 ```{r ggpairs, fig.cap="Pairs plot with `present` color coded.", fig.width=11, fig.height=11, eval=T, warning=FALSE}
 GGally::ggpairs(
   select(pts_env, -ID),
-  aes(color = factor(present)))
+  aes(color = factor(present), alpha = 0.5))
+
 ```
 
 # Logistic Regression
