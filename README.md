@@ -31,36 +31,16 @@ Use **Decision Trees** as a **Classification** technique to the data with the re
 
 ### Packages
 
-- dismo
-- dplyr
-- DT
-- ggplot2
-- here
-- htmltools
-- leaflet
-- mapview
-- purrr
-- raster
-- readr
-- rgbif
-- rgdal
-- rJava
-- sdmpredictors
-- sf
-- spocc
-- tidyr
+|           |            |         |
+| --------- | -----------| --------|
+| caret     | dismo      | dplyr   |
+| DT        | GGally     | ggplot2 |
+| here      | htmltools  | leaflet |
+| maptools  | mapview    | pdp     |
+| purrr     | ranger     | raster  |
+| readr     | rgbif      | rgdal   |
+| rJava     | rpart      | rsample |
+| sdmpredictors  | sf    | skimr   |
+| spocc     | tidyr      | usdm    |
+   
 
-caret,       # m: modeling framework
-  dplyr, ggplot2 ,here, readr, 
-  pdp,         # X: partial dependence plots
-  ranger,      # m: random forest modeling
-  rpart,       # m: recursive partition modeling
-  rpart.plot,  # m: recursive partition plotting
-  rsample,     # d: split train/test data
-  skimr,       # d: skim summarize data table
-  vip)         # X: varia
-  dismo, # species distribution modeling: maxent(), predict(), evaluate(), 
-  dplyr, ggplot2, GGally, here, maptools, readr, 
-  raster, readr, rsample, sf,
-  usdm
-  
