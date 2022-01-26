@@ -1,0 +1,784 @@
+---
+title: "Lab 1. Species Distribution Modeling"
+author: "Julia Parish"
+date: "2022-01-26"
+bibliography: bibliography.bib
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+options(scipen = 999)
+```
+
+```{r}
+librarian::shelf(
+  caret, dismo, dplyr, DT, GADMTools, GGally, ggplot2, here, htmltools, leaflet, mapview, maptools, purrr, ranger, raster, readr, rgbif, rgdal, rJava, rpart, rpart.plot, rsample, pdp, sdmpredictors, skimr, sf, spocc, tidyr, usdm, vip)
+
+select <- dplyr::select # overwrite raster::select
+options(readr.show_col_types = FALSE)
+
+```
+
+```{r}
+# set random seed for reproducibility
+set.seed(42)
+
+ggplot2::theme_set(ggplot2::theme_light())
+
+# directory to store data
+dir_data <- here("data/sdm")
+dir.create(dir_data, showWarnings = F, recursive = T)
+pts_env_csv <- file.path(dir_data, "pts_env.csv")
+pts_geo       <- file.path(dir_data, "pts.geojson")
+env_stack_grd <- file.path(dir_data, "env_stack.grd")
+mdl_maxv_rds  <- file.path(dir_data, "mdl_maxent_vif.rds")
+
+```
+
+```{r}
+redo <- FALSE
+```
+
+# Overview
+
+This machine learning analysis was completed as an assignment for my Master’s program course, Environmental Data Science 232: Machine Learning. It was assigned by our professor, Dr. Ben Best, as an introduction to machine learning by predicting presence of a chosen species from observations and environmental data found on the [Global Biodiversity Information Facility site](https://www.gbif.org/). It follows guidance found at [Species distribution modeling | R Spatial ](https://rspatial.org/raster/sdm/).
+
+My chosen species is coyote brush (*Baccharis pilularis*). **Baccharis pilularis** is native to the west coast of the United States (Oregon, California, and Baja California, Mexico). It is a shurb in the Asteraceae (Sunflower) family with oblanceolate to obovate toothed leaves, panicle-like inflorescence with staminate flowers that when mature mimic snow, and generally sticky (*not a pun*) [@jepson:bp].
+
+![Baccharis pilularis Image Credit: CalScape](images/bacpil_habitat_calscape.jpeg)
+
+# Explore
+
+The first step in this machine learning exercise is to download observation data of *Baccharis pilularis* from the [Global Biodiversity Information Facility site](https://www.gbif.org/).
+
+### Aquire species observations 
+```{r get obs}
+obs_csv <- file.path(dir_data, "obs.csv")
+obs_geo <- file.path(dir_data, "obs.geojson")
+
+```
+
+```{r}
+if (!file.exists(obs_geo) | redo){
+  # get species occurrence data from GBIF with coordinates
+  (res <- spocc::occ(
+    query = 'Baccharis pilularis', 
+    from = 'gbif', 
+    has_coords = T,
+    limit = 10000))
+  
+  # extract data frame from result
+  df <- res$gbif$data[[1]] 
+  readr::write_csv(df, obs_csv)
+  
+  # convert to points of observation from lon/lat columns in data frame
+  obs <- df %>% 
+    sf::st_as_sf(
+      coords = c("longitude", "latitude"),
+      crs = st_crs(4326)) %>% 
+    select(prov, key) # save space (joinable from obs_csv)
+  sf::write_sf(obs, obs_geo, delete_dsn=T)
+}
+obs <- sf::read_sf(obs_geo)
+nrow(obs) # number of rows
+ 
+```
+
+```{r}
+# show points on map
+mapview::mapview(obs, map.types = "CartoDB.Voyager")
+```
+
+```{r, message = FALSE}
+obs$key <- as.factor(obs$key)
+
+# count number of observations
+obs_num <- nrow(obs)
+
+# Check for duplicates - creates a vector of T or F for each of the points ???should you use 'key' vs 'geom'???
+dups <- duplicated(obs$key)
+
+# how many duplicates were there? This will sum only the TRUE values
+sum(dups)
+
+# create lon and lat columns in preparation to clean inaccurate data points
+
+obs <- obs %>%
+  dplyr::mutate(lon = sf::st_coordinates(.)[,1],
+                lat = sf::st_coordinates(.)[,2])
+
+usa <- gadm_sf_loadCountries("USA", level = 2, basefile = "data/")
+```
+
+- **Question 1**. How many observations total are in GBIF for your species?
+
+There are `r obs_num`` observations for *Baccharis pilularis* in this data. According to the [iNaturalist site](https://www.inaturalist.org/), over 19,000 observations have been uploaded of this species.
+
+- **Question 2**.  Do you see any odd observations, like marine species on land or vice versa? 
+
+There were only a few observably inaccurate data points for this species. These points seemingly fall in the ocean along the coastline. I chose not to remove these points as there may be inaccuracies on the basemap chosen and these points may actually be on land. I also did not want to lose potential valuable environmental data.
+
+### Aquire environmental data 
+
+The next step is to use the Species Distribution Model predictors R package `sdmpredictors` to get underlying environmental data for *Baccharis pilularis* observations. 
+
+##### Environmental data
+
+```{r get env}
+dir_env <- file.path(dir_data, "env")
+
+# set a default data directory
+options(sdmpredictors_datadir = dir_env)
+
+# choosing terrestrial
+env_datasets <- sdmpredictors::list_datasets(terrestrial = TRUE, marine = FALSE)
+
+# show table of datasets
+env_datasets %>% 
+  select(dataset_code, description, citation) %>% 
+  DT::datatable()
+
+# choose datasets for a vector
+env_datasets_vec <- c("WorldClim", "ENVIREM")
+
+# get layers
+env_layers <- sdmpredictors::list_layers(env_datasets_vec)
+DT::datatable(env_layers)
+
+# choose layers after some inspection and perhaps consulting literature
+env_layers_vec <- c("WC_alt", "WC_bio1", "WC_bio6", "WC_bio12", "ER_PETseasonality", "ER_topoWet", "ER_climaticMoistureIndex")
+
+# get layers
+env_stack <- load_layers(env_layers_vec)
+
+# interactive plot layers, hiding all but first (select others)
+# mapview(env_stack, hide = T) # makes the html too big for Github
+plot(env_stack, nc=2)
+```
+
+- **Question 3**. What environmental layers did you choose as predictors? Can you find any support for these in the literature?
+
+- *WC_alt = altitude*. This was chosen due to the limited elevation range listed on the CalFlora site, which states that coyote brush has been documented between -3 to 2310 meters [calflora:bp]. <br>
+- *WC_bio1 = annual mean temperature.*  This is a fundamental environmental indicator so it has been included.<br>
+- *WC_bio6 = minimum temperature of the coldest month* *Baccharis pilularis* is a distributed throughout the California Floristic Province, which is a mediterranean climate [cfp:2003]. This climatic region does not have prolonged freezing temperatures, so I am interested in analyzing the influence of minimum cold temperature on the habitat range of coyote brush. <br>
+- *WC_bio12 = annual precipitation*  <br>
+- *ER_PETseasonality = monthly variability in potential evapotranspiration* Coyote brush uptakes fog water, so I am curious to analyze if evapotranspiration rates influences its distribution [fog:2018]. I anticipate that areas with higher rates of evapotranspiration are not as suitable for *B. pilularis*. <br>
+- *ER_topoWet = topographic wetness index* this is a proxy for soil wetness, and can characterize biological processes such as annual net primary production, vegetation patterns, and forest site quality [twi:2020]. Coyote brush is found from wetlands to chaparral. I am interested to see if soil moisture influences the location of coyote brush. <br>
+- *ER_climaticMoistureIndex = climatic moisture index*. This is a metric of relative wetness and aridity. It is calculated as the difference between annual precipitation and potential evapotranspiration [cmi:2005].  
+
+##### Region of Interest
+The environmental data is on a global scale. Here we crop the environmental rasters to a region of interest around the distribution of *Baccharis pilularis*.
+
+```{r clip env_raster}
+obs_hull_geo  <- file.path(dir_data, "obs_hull.geojson")
+env_stack_grd <- file.path(dir_data, "env_stack.grd")
+
+if (!file.exists(obs_hull_geo) | redo){
+  # make convex hull around points of observation
+  obs_hull <- sf::st_convex_hull(st_union(obs))
+  
+  # save obs hull
+  write_sf(obs_hull, obs_hull_geo)
+}
+obs_hull <- read_sf(obs_hull_geo)
+
+# show points on map
+mapview(
+  list(obs, obs_hull))
+
+```
+
+```{r}
+if (!file.exists(env_stack_grd) | redo){
+  obs_hull_sp <- sf::as_Spatial(obs_hull)
+  env_stack <- raster::mask(env_stack, obs_hull_sp) %>% 
+    raster::crop(extent(obs_hull_sp))
+  writeRaster(env_stack, env_stack_grd, overwrite = T)  
+}
+env_stack <- stack(env_stack_grd)
+
+# show map
+# mapview(obs) + 
+#   mapview(env_stack, hide = T) # makes html too big for Github
+plot(env_stack, nc=2)
+```
+
+#### Pseudo-Absence
+
+```{r make absence pts}
+
+absence_geo <- file.path(dir_data, "absence.geojson")
+pts_geo     <- file.path(dir_data, "pts.geojson")
+pts_env_csv <- file.path(dir_data, "pts_env.csv")
+
+if (!file.exists(absence_geo) | redo){
+  # get raster count of observations
+  r_obs <- rasterize(
+    sf::as_Spatial(obs), env_stack[[1]], field=1, fun='count')
+  
+  # create mask for 
+  r_mask <- mask(env_stack[[1]] > -Inf, r_obs, inverse=T)
+  
+  # generate random points inside mask
+  absence <- dismo::randomPoints(r_mask, nrow(obs)) %>% 
+    as_tibble() %>% 
+    st_as_sf(coords = c("x", "y"), crs = 4326)
+  
+  write_sf(absence, absence_geo, delete_dsn=T)
+}
+absence <- read_sf(absence_geo)
+
+# show map of presence, ie obs, and absence
+mapview(absence, col.regions = "gray") +
+  mapview(obs, col.regions = "green")
+
+```
+
+```{r}
+
+if (!file.exists(pts_env_csv) | redo){
+
+  # combine presence and absence into single set of labeled points 
+  pts <- rbind(
+    obs %>% 
+      mutate(
+        present = 1) %>% 
+      select(present, key),
+    absence %>% 
+      mutate(
+        present = 0,
+        key     = NA)) %>% 
+    mutate(
+      ID = 1:n()) %>% 
+    relocate(ID)
+  write_sf(pts, pts_geo, delete_dsn=T)
+
+  # extract raster values for points
+  pts_env <- raster::extract(env_stack, as_Spatial(pts), df=TRUE) %>% 
+    tibble() %>% 
+    # join present and geometry columns to raster value results for points
+    left_join(
+      pts %>% 
+        select(ID, present),
+      by = "ID") %>% 
+    relocate(present, .after = ID) %>% 
+    # extract lon, lat as single columns
+    mutate(
+      #present = factor(present),
+      lon = st_coordinates(geometry)[,1],
+      lat = st_coordinates(geometry)[,2]) %>% 
+    select(-geometry)
+  write_csv(pts_env, pts_env_csv)
+}
+pts_env <- read_csv(pts_env_csv)
+
+pts_env %>% 
+  # show first 10 presence, last 10 absence
+  slice(c(1:10, (nrow(pts_env)-9):nrow(pts_env))) %>% 
+  DT::datatable(
+    rownames = F,
+    options = list(
+      dom = "t",
+      pageLength = 20))
+```
+
+In the end this table is the **data** that feeds into our species distribution model (`y ~ X`), where:
+
+- `y` is the `present` column with values of `1` (present) or `0` (absent)
+- `X` is all other columns:  `r paste(setdiff(names(pts_env), c("present", "ID")), collapse = ", ")`
+
+## Term Plots
+
+In the vein of [exploratory data analyses](https://r4ds.had.co.nz/exploratory-data-analysis.html), before going into modeling let's look at the data. Specifically, let's look at how obviously differentiated is the presence versus absence for each predictor -- a more pronounced presence peak should make for a more confident model. A plot for a specific predictor and response is called a "term plot". In this case we'll look for predictors where the presence (present = `1`) occupies a distinct "niche" from the background absence points (present = `0`).
+
+```{r plot terms}
+pts_env %>% 
+  select(-ID) %>% 
+  mutate(
+    present = factor(present)) %>% 
+  pivot_longer(-present) %>% 
+  ggplot() +
+  geom_density(aes(x = value, fill = present)) + 
+  scale_fill_manual(values = alpha(c("gray", "green"), 0.5)) +
+  scale_x_continuous(expand=c(0,0)) +
+  scale_y_continuous(expand=c(0,0)) +
+  theme_bw() + 
+  facet_wrap(~name, scales = "free") +
+  labs(title = "Baccharis pilularis Term Plots") +
+  theme(
+    legend.position = c(1, 0),
+    legend.justification = c(1, 0))
+```
+
+# Section B: Explore (cont'd)
+
+#### Pairs Plot
+Show correlations between variables. 
+
+```{r}
+pts_env <- read_csv(pts_env_csv)
+nrow(pts_env)
+
+datatable(pts_env, rownames = F)
+```
+
+```{r ggpairs, fig.cap="Pairs plot with `present` color coded.", fig.width=11, fig.height=11, eval=T, warning=FALSE}
+GGally::ggpairs(
+  select(pts_env, -ID),
+  aes(color = factor(present), alpha = 0.5))
+
+```
+
+# Logistic Regression
+
+## Setup Data
+
+Let's setup a data frame with only the data we want to model by:
+
+- Dropping rows with any NAs. Later we'll learn how to ["impute"](https://bbest.github.io/eds232-ml/glossary.html#imputation) values with guesses so as to not throw away data.
+- Removing terms we don't want to model. We can then use a simplified formula $present \sim .$ to predict $present$ based on all other fields in the data frame (i.e. the $X$`s in $y \sim x_1 + x_2 + ... x_n$).
+
+```{r setup d}
+# setup model data
+d <- pts_env %>% 
+  select(-ID) %>%  # remove terms we don't want to model
+  tidyr::drop_na() # drop the rows with NA values
+nrow(d)
+```
+
+## Linear Model
+
+Let's start as simply as possible with a linear model `lm()` on multiple predictors `X` to predict presence `y` using a simpler workflow.
+
+```{r fig.cap="Simpler workflow with only fit and predict of all data, i.e. no splitting.", echo=F}
+# [model-workflow_fit-all-predict-all - Google Drawings](https://docs.google.com/drawings/d/1JtWF-4dltWR0hSAZBGaqQdLShReLVjLhKZG8iRpVY2A/edit)
+knitr::include_graphics("https://docs.google.com/drawings/d/e/2PACX-1vRRvQdrDELT9QRPJxj8ooPvABgjQ-qqjzC0Ri9Hhv6n1O7N31eb4o6c7ZhZd6QtQ7XgZybNhUBESK9L/pub?w=572&h=170")
+```
+
+```{r fit lm}
+# fit a linear model
+mdl <- lm(present ~ ., data = d)
+summary(mdl)
+
+y_predict <- predict(mdl, d, type="response")
+y_true    <- d$present
+
+```
+
+```{r}
+range(y_predict)
+```
+
+```{r}
+range(y_true)
+```
+
+The problem with these predictions is that it ranges outside the possible values of present `1` and absent `0`. (Later we'll deal with converting values within this range to either `1` or `0` by applying a cutoff value; i.e. any values > 0.5 become 1 and below become 0.)
+
+## Generalized Linear Model
+
+To solve this problem of constraining the response term to being between the two possible values, i.e. the **probability** $p$ of being one or the other possible $y$ values, we'll apply the logistic transformation on the response term.
+
+$$
+logit(p_i) = \log_{e}\left( \frac{p_i}{1-p_i} \right)
+$$
+
+We can expand the expansion of the predicted term, i.e. the probability $p$ of being either $y$, with all possible predictors $X$ whereby each coeefficient $b$ gets multiplied by the value of $x$:
+
+$$
+\log_{e}\left( \frac{p_i}{1-p_i} \right) = b_0 + b_1 x_{1,i} + b_2 x_{2,i} + \cdots + b_k x_{k,i}
+$$
+
+```{r fit glm}
+# fit a generalized linear model with a binomial logit link function
+mdl <- glm(present ~ ., family = binomial(link="logit"), data = d)
+summary(mdl)
+
+y_predict <- predict(mdl, d, type="response")
+
+range(y_predict)
+```
+
+Excellent, our response is now constrained between 0 and 1. Next, let's look at the term plots to see the relationship between predictor and response.
+
+```{r termplots glm}
+# show term plots
+termplot(mdl, partial.resid = TRUE, se = TRUE, main = F, ylim="free")
+```
+
+## Generalized Additive Model
+
+With a generalized additive model we can add "wiggle" to the relationship between predictor and response by introducing smooth `s()` terms.
+
+```{r fit gam}
+librarian::shelf(mgcv)
+
+# fit a generalized additive model with smooth predictors
+mdl <- mgcv::gam(
+  formula = present ~ s(WC_alt) + s(WC_bio1) + s(WC_bio6) + s(WC_bio12) + 
+    s(ER_PETseasonality) + s(ER_topoWet) + s(ER_climaticMoistureIndex) + s(lon) + s(lat),
+  family = binomial, data = d)
+summary(mdl)
+
+# show term plots
+plot(mdl, scale=0)
+```
+
+**Question:** Which GAM environmental variables, and even range of values, seem to contribute most towards presence (above 0 response) versus absence (below 0 response)?
+
+The variables most likely to contribute to presence from the 7 I chose originally are ER_topoWet and ER-climaticMoistureIndex. For ER-climaticMoistureIndex, the higher the index number, specifically above 0, the higher likelihood of coyote brush presence. ER_topoWet is less conclusive as the higher likelihood of presence is in the value range less than 8, but there is a wide confidence interval. 
+
+## Maxent (Maximum Entropy)
+
+Maxent is probably the most commonly used species distribution model ([Elith 2011](http://dx.doi.org/10.1111/j.1472-4642.2010.00725.x)) since it performs well with few input data points, only requires presence points (and samples background for comparison) and is easy to use with a Java graphical user interface (GUI).
+
+```{r fit maxent}
+# load extra packages
+librarian::shelf(
+  maptools, sf)
+
+mdl_maxent_rds <- file.path(dir_data, "mdl_maxent.rds")
+
+# show version of maxent
+if (!interactive())
+  maxent()
+
+```
+
+```{r}
+# get environmental rasters
+# NOTE: the first part of Lab 1. SDM - Explore got updated to write this clipped environmental raster stack
+env_stack_grd <- file.path(dir_data, "env_stack.grd")
+env_stack <- stack(env_stack_grd)
+plot(env_stack, nc=2)
+```
+
+```{r}
+# get presence-only observation points (maxent extracts raster values for you)
+obs_geo <- file.path(dir_data, "obs.geojson")
+obs_sp <- read_sf(obs_geo) %>% 
+  sf::as_Spatial() # maxent prefers sp::SpatialPoints over newer sf::sf class
+
+# fit a maximum entropy model
+if (!file.exists(mdl_maxent_rds) | redo){
+  mdl <- maxent(env_stack, obs_sp)
+  readr::write_rds(mdl, mdl_maxent_rds)
+}
+mdl <- read_rds(mdl_maxent_rds)
+
+# plot variable contributions per predictor
+plot(mdl)
+```
+
+```{r}
+# plot term plots
+response(mdl)
+```
+
+**Question:** Which Maxent environmental variables, and even range of values, seem to contribute most towards presence (closer to 1 response) and how might this differ from the GAM results?
+
+Altitude and ER_climaticVariableMoisture variables contribute the most towards presence of coyote brush. The ER_climaticVariableMoisture was one of the main predicators in the GAM model. As for why altitude was not as obviously a primary presence predictor is potentially due to the scale of the GAM plot. It was difficult to intepret the presence weight on the WC_alt GAM plot as the elevation range on the x-axis was more extensive than other variable x-axes. 
+
+```{r}
+# predict
+y_predict <- predict(env_stack, mdl) #, ext=ext, progress='')
+
+plot(y_predict, main='Maxent, raw prediction')
+data(wrld_simpl, package="maptools")
+plot(wrld_simpl, add=TRUE, border='dark grey')
+```
+
+# Section C. Decision Trees
+
+```{r}
+d <- pts_env %>% 
+  select(-ID) %>%                   # not used as a predictor x
+  mutate(
+    present = factor(present)) %>%  # categorical response
+  na.omit()                         # drop rows with NA
+skim(d)
+```
+
+## Split data into training and testing
+
+```{r dt-data-prereq_1, echo=TRUE}
+# create training set with 80% of full data
+d_split  <- rsample::initial_split(d, prop = 0.8, strata = "present")
+d_train  <- rsample::training(d_split)
+
+# show number of rows present is 0 vs 1
+table(d$present)
+table(d_train$present)
+```
+
+# Decision Trees
+
+## Partition, depth=1
+
+```{=html}
+<!--
+Access and run the source code for this notebook [here](https://rstudio.cloud/project/801185). -->
+```
+
+```{r rpart-stump, echo=TRUE, fig.width=4, fig.height=3, fig.show='hold', fig.cap="Decision tree illustrating the single split on feature x (left).", out.width="48%"}
+# run decision stump model
+mdl <- rpart(
+  present ~ ., data = d_train, 
+  control = list(
+    cp = 0, minbucket = 5, maxdepth = 1))
+mdl
+
+```
+
+```{r}
+# plot tree 
+par(mar = c(1, 1, 1, 1))
+rpart.plot(mdl)
+```
+
+
+## Partition, depth=default
+
+```{r rpart-default, echo=TRUE, fig.width=4, fig.height=3, fig.show='hold', fig.cap="Decision tree $present$ classification.", out.width="48%"}
+# decision tree with defaults
+mdl <- rpart(present ~ ., data = d_train)
+mdl
+
+```
+
+```{r}
+rpart.plot(mdl)
+
+```
+
+```{r}
+# plot complexity parameter
+plotcp(mdl)
+
+# rpart cross validation results
+mdl$cptable
+```
+
+**Question: Based on the complexity plot threshold, what size of tree is recommended?**
+Recommended tree size is 3.
+
+## Feature interpretation
+
+```{r cp-table, fig.cap="Cross-validated accuracy rate for the 20 different $\\alpha$ parameter values in our grid search. Lower $\\alpha$ values (deeper trees) help to minimize errors.", fig.height=3}
+
+# caret cross validation results
+mdl_caret <- train(
+  present ~ .,
+  data       = d_train,
+  method     = "rpart",
+  trControl  = trainControl(method = "cv", number = 10),
+  tuneLength = 20)
+
+ggplot(mdl_caret)
+```
+
+```{r dt-vip, fig.height=5.5, fig.cap="Variable importance based on the total reduction in MSE for the Ames Housing decision tree."}
+vip(mdl_caret, num_features = 40, bar = FALSE)
+```
+
+**Question:** what are the top 3 most important variables of your model?
+ER_PETseasonality, WC_bio6, WC_alt
+
+```{r dt-pdp, fig.width=10, fig.height= 3.5, fig.cap="Partial dependence plots to understand the relationship between ER_PETseasonality, WC_bio6 and present."}
+# Construct partial dependence plots
+p1 <- partial(mdl_caret, pred.var = "ER_PETseasonality") %>% autoplot()
+p2 <- partial(mdl_caret, pred.var = "WC_bio6") %>% autoplot()
+p3 <- partial(mdl_caret, pred.var = c("ER_PETseasonality", "WC_bio6")) %>% 
+  plotPartial(levelplot = FALSE, zlab = "yhat", drape = TRUE, 
+              colorkey = TRUE, screen = list(z = -20, x = -60))
+
+# Display plots side by side
+gridExtra::grid.arrange(p1, p2, p3, ncol = 3)
+```
+
+# Random Forests
+
+## Fit
+
+```{r out-of-box-rf}
+# number of features
+n_features <- length(setdiff(names(d_train), "present"))
+
+# fit a default random forest model
+mdl_rf <- ranger(present ~ ., data = d_train)
+
+# get out of the box RMSE
+(default_rmse <- sqrt(mdl_rf$prediction.error))
+```
+
+## Feature interpretation
+
+```{r feature-importance}
+# re-run model with impurity-based variable importance
+mdl_impurity <- ranger(
+  present ~ ., data = d_train,
+  importance = "impurity")
+
+# re-run model with permutation-based variable importance
+mdl_permutation <- ranger(
+  present ~ ., data = d_train,
+  importance = "permutation")
+```
+
+```{r feature-importance-plot, fig.cap="Most important variables based on impurity (left) and permutation (right).", fig.height=4.5, fig.width=10}
+p1 <- vip::vip(mdl_impurity, bar = FALSE)
+p2 <- vip::vip(mdl_permutation, bar = FALSE)
+
+gridExtra::grid.arrange(p1, p2, nrow = 1)
+```
+
+**Question:** How might variable importance differ between rpart and RandomForest in your model outputs?
+RandomForest it creates a "forest" of decision trees where r part creates a single decision tree. RandomForest reduces model variance, which has changed the importance of environmental variables predicting presence of coyote brush. The most important varible with RandomForest is WC_bio6.
+
+# Section D. Evaluate Models
+
+```{r}
+# read points of observation: presence (1) and absence (0)
+pts <- read_sf(pts_geo)
+
+# read raster stack of environment
+env_stack <- raster::stack(env_stack_grd)
+```
+
+## Split observations into training and testing
+
+```{r dt-data-prereq, echo=TRUE}
+# create training set with 80% of full data
+pts_split  <- rsample::initial_split(
+  pts, prop = 0.8, strata = "present")
+pts_train  <- rsample::training(pts_split)
+pts_test   <- rsample::testing(pts_split)
+
+pts_train_p <- pts_train %>% 
+  filter(present == 1) %>% 
+  as_Spatial()
+pts_train_a <- pts_train %>% 
+  filter(present == 0) %>% 
+  as_Spatial()
+```
+
+# Calibrate: Model Selection
+
+```{r}
+# show pairs plot before multicollinearity reduction with vifcor()
+pairs(env_stack)
+```
+
+```{r}
+# calculate variance inflation factor per predictor, a metric of multicollinearity between variables
+vif(env_stack)
+```
+
+```{r}
+# stepwise reduce predictors, based on a max correlation of 0.7 (max 1)
+v <- vifcor(env_stack, th=0.7) 
+v
+```
+
+```{r}
+# reduce environmental raster stack by 
+env_stack_v <- usdm::exclude(env_stack, v)
+
+# show pairs plot after multicollinearity reduction with vifcor()
+pairs(env_stack_v)
+```
+
+
+```{r, message = false}
+# fit a maximum entropy model
+if (!file.exists(mdl_maxv_rds)){
+  mdl_maxv <- maxent(env_stack_v, sf::as_Spatial(pts_train))
+  readr::write_rds(mdl_maxv, mdl_maxv_rds)
+}
+
+mdl_maxv <- read_rds(mdl_maxv_rds)
+```
+
+```{r}
+# plot variable contributions per predictor
+plot(mdl_maxv)
+```
+
+```{r}
+# plot term plots
+response(mdl_maxv)
+```
+
+**Question:** Which variables were removed due to multicollinearity and what is the rank of most to least important remaining variables in your model?
+
+WC_bio1, WC_bio6, ER_climaticMoistureIndex were removed. For the environmental variable ranking of most to least important variable for species presence is:<br>
+- ER_PETseasonality
+- WC_alt
+- WC_bio12
+- ER_topoWet  
+
+```{r}
+# predict
+y_maxv <- predict(env_stack, mdl_maxv) #, ext=ext, progress='')
+
+plot(y_maxv, main='Maxent, raw prediction')
+data(wrld_simpl, package="maptools")
+plot(wrld_simpl, add=TRUE, border='dark grey')
+```
+
+# Evaluate: Model Performance
+
+## Area Under the Curve (AUC), Reciever Operater Characteristic (ROC) Curve and Confusion Matrix
+
+```{r}
+pts_test_p <- pts_test %>% 
+  filter(present == 1) %>% 
+  as_Spatial()
+pts_test_a <- pts_test %>% 
+  filter(present == 0) %>% 
+  as_Spatial()
+
+y_maxv <- predict(mdl_maxv, env_stack)
+#plot(y_maxv)
+
+e <- dismo::evaluate(
+  p     = pts_test_p,
+  a     = pts_test_a, 
+  model = mdl_maxv,
+  x     = env_stack)
+e
+
+```
+
+```{r}
+plot(e, 'ROC')
+
+thr <- threshold(e)[['spec_sens']]
+thr
+
+p_true <- na.omit(raster::extract(y_maxv, pts_test_p) >= thr)
+a_true <- na.omit(raster::extract(y_maxv, pts_test_a) < thr)
+
+# (t)rue/(f)alse (p)ositive/(n)egative rates
+tpr <- sum(p_true)/length(p_true)
+fnr <- sum(!p_true)/length(p_true)
+fpr <- sum(!a_true)/length(a_true)
+tnr <- sum(a_true)/length(a_true)
+
+matrix(
+  c(tpr, fnr,
+    fpr, tnr), 
+  nrow=2, dimnames = list(
+    c("present_obs", "absent_obs"),
+    c("present_pred", "absent_pred")))
+
+# add point to ROC plot
+points(fpr, tpr, pch=23, bg="blue")
+
+plot(y_maxv > thr)
+```
+
+
+# References

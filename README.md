@@ -33,14 +33,14 @@ Use **Decision Trees** as a **Classification** technique to the data with the re
 
 |           |            |         |
 | --------- | -----------| --------|
-| caret     | dismo      | dplyr   |
-| DT        | GGally     | ggplot2 |
-| here      | htmltools  | leaflet |
-| maptools  | mapview    | pdp     |
-| purrr     | ranger     | raster  |
-| readr     | rgbif      | rgdal   |
-| rJava     | rpart      | rsample |
-| sdmpredictors  | sf    | skimr   |
-| spocc     | tidyr      | usdm    |
-   
+| caret     | dismo      | dplyr   | 
+| DT        | GADMTools  | GGally  |
+| ggplot2   | here       | htmltools |
+| leaflet   | maptools   | mapview |
+| pdp       | purrr      | ranger  |
+| raster    | readr      | rgbif   |
+| rgdal     |  rJava     | rpart   |
+| rsample   | sdmpredictors | sf   |
+| skimr     | spocc      | tidyr   |
+| usdm      | vip        |         |
 

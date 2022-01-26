@@ -41,7 +41,7 @@ My chosen species is coyote brush (*Baccharis pilularis*). **Baccharis pilularis
 
 # Explore
 
-The first step in this machine learning excercise is to download observation data of *Baccharis pilularis* from the [iNaturalist site](https://www.inaturalist.org/).
+The first step in this machine learning excercise is to download observation data of *Baccharis pilularis* from the [Global Biodiversity Information Facility site](https://www.gbif.org/).
 
 ### Aquire species observations 
 ```{r get obs}
