@@ -2,7 +2,6 @@
 title: "Lab 1. Species Distribution Modeling"
 author: "Julia Parish"
 date: "2022-01-26"
-bibliography: bibliography.bib
 output: html_document
 ---
 
@@ -160,13 +159,13 @@ plot(env_stack, nc=2)
 
 - **Question 3**. What environmental layers did you choose as predictors? Can you find any support for these in the literature?
 
-- *WC_alt = altitude*. This was chosen due to the limited elevation range listed on the CalFlora site, which states that coyote brush has been documented between -3 to 2310 meters [calflora:bp]. <br>
+- *WC_alt = altitude*. This was chosen due to the limited elevation range listed on the CalFlora site, which states that coyote brush has been documented between -3 to 2310 meters (CalFlora 2021). <br>
 - *WC_bio1 = annual mean temperature.*  This is a fundamental environmental indicator so it has been included.<br>
-- *WC_bio6 = minimum temperature of the coldest month* *Baccharis pilularis* is a distributed throughout the California Floristic Province, which is a mediterranean climate [cfp:2003]. This climatic region does not have prolonged freezing temperatures, so I am interested in analyzing the influence of minimum cold temperature on the habitat range of coyote brush. <br>
+- *WC_bio6 = minimum temperature of the coldest month* *Baccharis pilularis* is a distributed throughout the California Floristic Province, which is a mediterranean climate (Calsbeek 2003). This climatic region does not have prolonged freezing temperatures, so I am interested in analyzing the influence of minimum cold temperature on the habitat range of coyote brush. <br>
 - *WC_bio12 = annual precipitation*  <br>
-- *ER_PETseasonality = monthly variability in potential evapotranspiration* Coyote brush uptakes fog water, so I am curious to analyze if evapotranspiration rates influences its distribution [fog:2018]. I anticipate that areas with higher rates of evapotranspiration are not as suitable for *B. pilularis*. <br>
-- *ER_topoWet = topographic wetness index* this is a proxy for soil wetness, and can characterize biological processes such as annual net primary production, vegetation patterns, and forest site quality [twi:2020]. Coyote brush is found from wetlands to chaparral. I am interested to see if soil moisture influences the location of coyote brush. <br>
-- *ER_climaticMoistureIndex = climatic moisture index*. This is a metric of relative wetness and aridity. It is calculated as the difference between annual precipitation and potential evapotranspiration [cmi:2005].  
+- *ER_PETseasonality = monthly variability in potential evapotranspiration* Coyote brush uptakes fog water, so I am curious to analyze if evapotranspiration rates influences its distribution (Emery 2018). I anticipate that areas with higher rates of evapotranspiration are not as suitable for *B. pilularis*. <br>
+- *ER_topoWet = topographic wetness index* this is a proxy for soil wetness, and can characterize biological processes such as annual net primary production, vegetation patterns, and forest site quality. Coyote brush is found from wetlands to chaparral. I am interested to see if soil moisture influences the location of coyote brush. <br>
+- *ER_climaticMoistureIndex = climatic moisture index*. This is a metric of relative wetness and aridity. It is calculated as the difference between annual precipitation and potential evapotranspiration (Vorosmarty 2005).  
 
 ##### Region of Interest
 The environmental data is on a global scale. Here we crop the environmental rasters to a region of interest around the distribution of *Baccharis pilularis*.
@@ -691,7 +690,7 @@ pairs(env_stack_v)
 ```
 
 
-```{r, message = false}
+```{r }
 # fit a maximum entropy model
 if (!file.exists(mdl_maxv_rds)){
   mdl_maxv <- maxent(env_stack_v, sf::as_Spatial(pts_train))
@@ -782,3 +781,15 @@ plot(y_maxv > thr)
 
 
 # References
+
+Bogler, David. 2012. *Baccharis pilularis*. Jepson Flora Project (eds.) Jepson eFlora.
+https://ucjeps.berkeley.edu/eflora/eflora_display.php?tid=1603. Last accessed on January 08, 2022 
+
+CalFlora. 2021. *Plant Location Suitability - Baccharis pilularis*.
+https://www.calflora.org/entry/compare.html?crn=1031. Last accessed 25 January 2022
+
+Vorosmarty, C.J., Douglas, E.M., Green, P.A., Revenda, C. 2005. *Geospatial indicators of emerging water stress: An application to Africa.* Ambio. 34:3. 230 - 236.
+
+Emery, Nathan C., D'Antonio, Carla M., Still, Christopher J. 2018. F*og and live fuel moisture in coastal California shrublands.* Ecosphere. 9:14. https://doi.org/10.1002/ecs2.2167
+
+Calsbeek, Ryan, Thompson, John, and Richardson, James. 2003. *Patterns of molecular evolution and diversification in a biodiversity hotspot: the California Floristic Province.* Molecular Ecology. 12. 1021-1029.
